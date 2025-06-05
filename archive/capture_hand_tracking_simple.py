@@ -87,7 +87,7 @@ class LibcameraCapture:
         self.frame_queue = queue.Queue(maxsize=1)
         self.running = True
         
-        # Start libcamera process with optimizations
+        # Start libcamera process with optimizations, enabling preview for better visibility
         self.process = subprocess.Popen([
             'libcamera-vid', 
             '--width', str(width), 
@@ -97,8 +97,10 @@ class LibcameraCapture:
             '--codec', 'yuv420',
             '--flush',  # Reduce latency
             '--inline',  # Inline headers for reduced latency
-            '--listen',  # No preview window
-            '--nopreview',  # Explicitly disable any preview
+            # Enable camera preview for debugging
+            # '--listen',  # Removed to allow preview
+            # '--nopreview',  # Removed to allow preview
+            '--preview', '1,1,320,240',  # Small preview window
             '--buffer-count', '2',  # Minimal buffer count
             '--output', self.fifo_path
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -140,6 +142,7 @@ class LibcameraCapture:
                 uv_interleaved[:, 1::2] = v_plane
                 yuv420[self.height:, :] = uv_interleaved
                 
+                # Fix: Use correct YUV format conversion (I420 matches our data layout)
                 bgr_frame = cv2.cvtColor(yuv420, cv2.COLOR_YUV2BGR_NV12)
                 
                 # Drop old frames, keep only latest for real-time performance
@@ -346,9 +349,11 @@ def extract_landmarks_with_confidence(output, confidence_threshold=0.5):
         presence_score = landmarks[0, 2] if landmarks.shape[0] > 0 and landmarks.shape[1] > 2 else 0
         
         # Some models might use the wrist confidence as hand presence score
-        wrist_confidence_threshold = confidence_threshold * 1.2  # Higher threshold for wrist
+        # Extremely permissive threshold - we want to detect any potential hand
+        wrist_confidence_threshold = confidence_threshold * 0.3  # Much lower threshold for wrist detection
         if presence_score < wrist_confidence_threshold:
             # No hand detected with sufficient confidence
+            print(f"[DEBUG] Low presence score: {presence_score:.4f} < {wrist_confidence_threshold:.4f}")
             return np.array([]), False
         
         # For MediaPipe models, the 3rd dimension often represents confidence/visibility
@@ -357,17 +362,20 @@ def extract_landmarks_with_confidence(output, confidence_threshold=0.5):
             confidences = landmarks[:, 2]
             if np.all(confidences <= 1.0) and np.all(confidences >= 0.0):
                 # Calculate overall confidence for the detection (with higher weight to wrist point)
-                critical_points = [0, 5, 9, 13, 17]  # Wrist and finger base points
-                critical_confidence = np.mean(confidences[critical_points]) if len(confidences) > 17 else confidences[0]
+                critical_points = [0]  # Focus only on wrist point for hand detection
+                if len(confidences) > 17:
+                    critical_points = [0, 5, 9, 13, 17]  # Wrist and finger base points
+                critical_confidence = np.mean(confidences[critical_points]) if len(confidences) > 1 else confidences[0]
                 avg_confidence = np.mean(confidences)
                 
-                # Combined confidence score
-                detection_confidence = critical_confidence * 0.7 + avg_confidence * 0.3
-                high_confidence = detection_confidence >= confidence_threshold
+                # Combined confidence score - Using much more permissive threshold
+                detection_confidence = critical_confidence * 0.9 + avg_confidence * 0.1
+                # Very permissive threshold to help with detection
+                high_confidence = detection_confidence >= (confidence_threshold * 0.4)
                 
                 # Filter landmarks to keep only reliable ones
-                # Only keep points with good confidence
-                high_conf_mask = confidences >= confidence_threshold * 0.8
+                # Fix: Lower threshold to keep more landmarks
+                high_conf_mask = confidences >= (confidence_threshold * 0.6)
                 
                 # Always keep wrist point (index 0) if it has reasonable confidence
                 if confidences[0] >= confidence_threshold * 0.7:

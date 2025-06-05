@@ -1,0 +1,6 @@
+# Required dependencies for hand tracking project
+opencv-python>=4.5.0
+numpy>=1.19.0
+tflite-runtime>=2.5.0
+# Optional fallback if tflite-runtime is not available
+# tensorflow>=2.5.0
