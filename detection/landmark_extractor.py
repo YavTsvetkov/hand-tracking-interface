@@ -3,6 +3,7 @@ Hand landmark extraction and processing.
 """
 
 import numpy as np
+from .improved_confidence_analyzer import ConfidenceAnalyzer
 
 class LandmarkExtractor:
     """Extracts and processes hand landmarks from model inference results."""
@@ -10,18 +11,24 @@ class LandmarkExtractor:
     def __init__(self, confidence_threshold=0.6):
         """Initialize landmark extractor with confidence threshold."""
         self.confidence_threshold = confidence_threshold
+        self.confidence_analyzer = ConfidenceAnalyzer()
         
-    def extract_landmarks(self, landmarks, handedness, hand_scores, frame_shape):
+    def extract_landmarks(self, landmarks, handedness, hand_scores, landmark_scores, frame_shape):
         """Extract landmarks and convert them to image coordinates."""
         if landmarks is None or len(landmarks) == 0 or hand_scores is None:
             return None, None, 0.0
             
-        # Get confidence score
-        confidence = float(hand_scores[0][0])
+        # Use improved confidence analysis with landmark scores
+        is_valid_detection, overall_confidence, analysis_details = self.confidence_analyzer.analyze_detection(
+            landmarks[0], handedness, hand_scores, landmark_scores, frame_shape
+        )
         
-        # Skip low confidence detections
-        if confidence < self.confidence_threshold:
-            return None, None, confidence
+        print(f"[DEBUG] Raw presence: {float(hand_scores[0][0]):.3f}, "
+              f"Valid: {is_valid_detection}, Overall conf: {overall_confidence:.3f}")
+        
+        # Skip if not a valid detection
+        if not is_valid_detection:
+            return None, None, overall_confidence
             
         # Extract hand landmarks (21 points)
         # The landmarks array shape could vary depending on the model
@@ -38,9 +45,9 @@ class LandmarkExtractor:
                     hand_landmarks = hand_landmarks.reshape(21, 3)
                 else:
                     # If we can't determine the format, return no detection
-                    return None, None, confidence
+                    return None, None, overall_confidence
         except Exception as e:
-            return None, None, confidence
+            return None, None, overall_confidence
         
         # Get image dimensions
         img_height, img_width = frame_shape[:2]
@@ -64,12 +71,12 @@ class LandmarkExtractor:
         # Check if points are within image bounds (use only wrist point for check)
         wrist = pixels[0]
         if not (0 <= wrist[0] < img_width and 0 <= wrist[1] < img_height):
-            return None, None, confidence
+            return None, None, overall_confidence
             
         # Extract wrist position (landmark 0 is the wrist)
         wrist_position = wrist
         
-        return pixels, wrist_position, confidence
+        return pixels, wrist_position, overall_confidence
         
     def calculate_critical_confidence(self, landmarks, critical_indices=[0, 5, 9, 13, 17]):
         """Calculate confidence focusing on critical landmarks (wrist and finger bases)."""

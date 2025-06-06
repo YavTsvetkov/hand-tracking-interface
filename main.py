@@ -133,11 +133,11 @@ class HandTrackingApp:
                 input_tensor = self.inference_engine.prepare_input(processed_frame)
                 
                 # Run inference
-                landmarks, handedness, hand_scores = self.inference_engine.run_inference(input_tensor)
+                landmarks, handedness, hand_scores, landmark_scores = self.inference_engine.run_inference(input_tensor)
                 
                 # Extract landmarks
                 pixels, wrist_position, confidence = self.landmark_extractor.extract_landmarks(
-                    landmarks, handedness, hand_scores, frame.shape
+                    landmarks, handedness, hand_scores, landmark_scores, frame.shape
                 )
                 
                 # Initialize tracking variables

@@ -40,9 +40,10 @@ class InferenceEngine:
         # Run inference
         interpreter.invoke()
         
-        # Get outputs
+        # Get all 4 outputs
         landmarks = interpreter.get_tensor(output_details[0]['index'])
         handedness = interpreter.get_tensor(output_details[1]['index'])
         hand_score = interpreter.get_tensor(output_details[2]['index'])
+        landmark_scores = interpreter.get_tensor(output_details[3]['index'])  # NEW: 4th output
         
-        return landmarks, handedness, hand_score
+        return landmarks, handedness, hand_score, landmark_scores
