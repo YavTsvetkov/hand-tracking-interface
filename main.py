@@ -59,8 +59,8 @@ class HandTrackingApp:
         
     def init_detection(self):
         """Initialize detection components."""
-        print(f"[INFO] Loading model: {self.args.model}")
-        self.model_loader = ModelLoader(model_path=self.args.model)
+        print(f"[INFO] Loading model: models/hand_landmark_lite.tflite")
+        self.model_loader = ModelLoader()  # Fixed model path
         if not self.model_loader.load_model():
             print("[ERROR] Failed to load model")
             sys.exit(1)
@@ -72,7 +72,7 @@ class HandTrackingApp:
         """Initialize tracking components."""
         self.hand_tracker = HandTracker(
             detection_loss_frames=self.args.detection_loss_frames,
-            stable_threshold=3
+            stable_threshold=1  # Reduced frames needed to confirm detection for immediate preview
         )
         
         self.position_validator = PositionValidator(
@@ -134,11 +134,13 @@ class HandTrackingApp:
                 
                 # Run inference
                 landmarks, handedness, hand_scores, landmark_scores = self.inference_engine.run_inference(input_tensor)
+                print(f"[DEBUG] Inference output - hand_scores: {hand_scores}, landmark_scores: {landmark_scores}")
                 
                 # Extract landmarks
                 pixels, wrist_position, confidence = self.landmark_extractor.extract_landmarks(
                     landmarks, handedness, hand_scores, landmark_scores, frame.shape
                 )
+                print(f"[DEBUG] Landmark extraction - wrist_position: {wrist_position}, confidence: {confidence}")
                 
                 # Initialize tracking variables
                 is_valid = False
@@ -148,6 +150,7 @@ class HandTrackingApp:
                 if wrist_position is not None:
                     # Validate position physically
                     is_valid = self.position_validator.is_valid(wrist_position)
+                    print(f"[DEBUG] PositionValidator.is_valid -> {is_valid} for wrist_position {wrist_position}")
                     
                     # Skip suspiciously still detection at the beginning to establish tracking
                     if self.frame_count < 30:
@@ -157,6 +160,7 @@ class HandTrackingApp:
                         is_suspicious = self.position_validator.is_suspiciously_still(
                             threshold=self.args.false_positive_threshold
                         )
+                        print(f"[DEBUG] PositionValidator.is_suspiciously_still -> {is_suspicious}")
                     
                     if is_valid and not is_suspicious:
                         # Apply smoothing
@@ -164,10 +168,12 @@ class HandTrackingApp:
                         
                         # Update hand tracker
                         self.hand_tracker.update(smoothed_position, confidence)
+                        print(f"[DEBUG] Updated tracker with smoothed_position: {smoothed_position}, confidence: {confidence}")
                     else:
                         # Position is invalid or suspicious, don't update tracking
                         wrist_position = None
                         self.hand_tracker.update(None)
+                        print(f"[DEBUG] Updated tracker with None - is_valid: {is_valid}, is_suspicious: {is_suspicious}")
                 else:
                     # No detection
                     self.hand_tracker.update(None)
@@ -175,9 +181,7 @@ class HandTrackingApp:
                 # Get tracking state
                 is_hand_present = self.hand_tracker.is_hand_present
                 tracking_quality = self.hand_tracker.get_tracking_quality()
-                is_tracking_stable = self.hand_tracker.is_tracking_stable(
-                    threshold=self.args.stability_threshold
-                )
+                print(f"[DEBUG] HandTracker state - is_hand_present: {is_hand_present}, tracking_quality: {tracking_quality:.2f}")
                 
                 # Display frame if not in headless mode
                 if not self.headless:

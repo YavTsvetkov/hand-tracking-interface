@@ -25,7 +25,7 @@ class ConfidenceAnalyzer:
         """
         analysis = {
             'presence_score': float(hand_presence_score[0][0]),
-            'handedness_score': float(handedness[0][0]),
+            'handedness_score': float(handedness[0][0]) if handedness is not None else 0.5,  # Default when not available
             'landmark_scores': landmark_scores[0] if landmark_scores is not None else None,
             'landmark_consistency': 0.0,
             'position_validity': False,
@@ -36,7 +36,8 @@ class ConfidenceAnalyzer:
         presence_ok = analysis['presence_score'] >= self.presence_threshold
         
         # 2. Check handedness confidence (higher values suggest more confident detection)
-        handedness_ok = analysis['handedness_score'] >= self.handedness_threshold
+        # If handedness is not available, assume it's OK
+        handedness_ok = True if handedness is None else analysis['handedness_score'] >= self.handedness_threshold
         
         # 3. Analyze landmark consistency
         if landmarks is not None and len(landmarks) > 0:
@@ -44,10 +45,12 @@ class ConfidenceAnalyzer:
             analysis['position_validity'] = self._check_position_validity(landmarks, frame_shape)
         
         # 4. Analyze landmark scores (NEW: use the 4th model output)
-        landmark_scores_ok = True
+        landmark_scores_ok = True  # Default to True if we don't have landmark scores
         if analysis['landmark_scores'] is not None:
             landmark_scores_ok = self._analyze_landmark_scores(analysis['landmark_scores'])
             analysis['landmark_scores_valid'] = landmark_scores_ok
+        else:
+            analysis['landmark_scores_valid'] = True  # No landmark scores available, assume OK
         
         # 5. Calculate overall confidence
         landmark_ok = analysis['landmark_consistency'] >= self.landmark_consistency_threshold
@@ -55,9 +58,14 @@ class ConfidenceAnalyzer:
         # Combined decision logic - now includes landmark scores
         signals_passed = sum([presence_ok, handedness_ok, landmark_ok, analysis['position_validity'], landmark_scores_ok])
         
-        # More strict validation: require landmark scores to be valid for positive detection
-        # Also increase the threshold requirements
-        is_valid = (presence_ok and landmark_scores_ok and signals_passed >= 4)
+        # If we have landmark scores, require them to be valid for positive detection
+        # If we don't have landmark scores, use less strict validation
+        if analysis['landmark_scores'] is not None:
+            # More strict validation when landmark scores are available
+            is_valid = (presence_ok and landmark_scores_ok and signals_passed >= 4)
+        else:
+            # Less strict validation when landmark scores are not available
+            is_valid = (presence_ok and signals_passed >= 3)
         
         # Calculate weighted confidence score (including landmark scores)
         analysis['overall_confidence'] = (

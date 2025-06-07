@@ -15,11 +15,7 @@ def parse_args():
     parser.add_argument('--fps', type=int, default=Settings.DEFAULT_FPS,
                        help=f'Camera framerate (default: {Settings.DEFAULT_FPS})')
     
-    # Model settings
-    parser.add_argument('--model', type=str, default=Settings.DEFAULT_MODEL_PATH, 
-                       help=f'Path to TFLite hand landmark model (default: {Settings.DEFAULT_MODEL_PATH})')
-    
-    # Detection settings
+    # Detection settings (model is fixed to hand_landmark_lite.tflite)
     parser.add_argument('--confidence', type=float, default=Settings.DEFAULT_CONFIDENCE_THRESHOLD,
                        help=f'Minimum confidence threshold (0-1, default: {Settings.DEFAULT_CONFIDENCE_THRESHOLD})')
     parser.add_argument('--smoothing', type=float, default=Settings.DEFAULT_SMOOTHING_FACTOR,
