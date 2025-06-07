@@ -35,6 +35,8 @@ class FrameRenderer:
             
         # Make a copy to avoid modifying the original frame
         output_frame = frame.copy()
+        # Draw coordinate axes (green)
+        self._draw_axes(output_frame)
         
         # Use renderer to draw landmarks if available
         if renderer is not None and landmarks is not None:
@@ -104,3 +106,13 @@ class FrameRenderer:
             
         cv2.putText(frame, f"State: {state}", (20, frame.shape[0] - 20), 
                    font, 0.5, (255, 255, 255), 1)
+    
+    def _draw_axes(self, frame, color=(0, 255, 0), thickness=2):
+        """Draw simple X–Y axes crossing at frame center."""
+        h, w = frame.shape[:2]
+        cx, cy = w // 2, h // 2
+        length = min(w, h) // 2  # extend from center to edges
+        # Horizontal axis
+        cv2.line(frame, (cx - length, cy), (cx + length, cy), color, thickness)
+        # Vertical axis
+        cv2.line(frame, (cx, cy - length), (cx, cy + length), color, thickness)
