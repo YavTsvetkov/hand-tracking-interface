@@ -1,0 +1,10 @@
+# ROS 2 dependencies for hand tracking cmd_vel control
+# Install these with: pip install -r ros_requirements.txt
+
+rclpy>=3.0.0
+geometry-msgs>=4.0.0
+std-msgs>=4.0.0
+
+# Note: You also need to have ROS 2 installed on your system
+# Follow the official ROS 2 installation guide for your platform:
+# https://docs.ros.org/en/humble/Installation.html

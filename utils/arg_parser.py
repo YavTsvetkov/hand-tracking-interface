@@ -43,4 +43,10 @@ def parse_args():
     parser.add_argument('--debug', action='store_true', 
                        help='Enable debug output')
     
+    # ROS 2 settings
+    parser.add_argument('--enable_ros', action='store_true', 
+                       help='Enable ROS 2 cmd_vel publishing for robot control')
+    parser.add_argument('--ros_topic', type=str, default='/cmd_vel',
+                       help='ROS 2 topic name for cmd_vel messages (default: /cmd_vel)')
+    
     return parser.parse_args()

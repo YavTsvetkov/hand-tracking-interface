@@ -24,6 +24,11 @@ class Settings:
     # Performance settings
     DEFAULT_FRAME_SKIP = 1
     
+    # ROS 2 settings
+    DEFAULT_ROS_TOPIC = "/cmd_vel"
+    DEFAULT_ROS_NODE_NAME = "hand_tracking_controller"
+    DEFAULT_ROS_PUBLISH_RATE = 10.0  # Hz
+    
     @classmethod
     def get_resolution_as_tuple(cls, resolution_str=None):
         """Convert resolution string to width, height tuple."""
