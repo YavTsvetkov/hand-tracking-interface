@@ -17,6 +17,7 @@ from detection import ModelLoader, InferenceEngine
 from tracking import HandTracker, PositionValidator, CoordinateSmoother
 from visualization import Renderer, SimpleStatusDisplay, FrameRenderer
 from utils import parse_args, FPSCounter
+from ros_cmd_vel import CoordinateParser
 
 
 class HandTrackingApp:
@@ -32,6 +33,7 @@ class HandTrackingApp:
         self.init_detection()
         self.init_tracking()
         self.init_visualization()
+        self.init_coordinate_parser()
         
         # Performance tracking
         self.fps_counter = FPSCounter(window_size=30)
@@ -88,6 +90,16 @@ class HandTrackingApp:
             history_size=2                              # Still minimal history (2 frames) for real-time responsiveness
         )
         
+    def init_coordinate_parser(self):
+        """Initialize coordinate parser for cmd_vel control."""
+        print(f"[INFO] Initializing coordinate parser")
+        self.coordinate_parser = CoordinateParser(
+            frame_width=self.width,
+            frame_height=self.height,
+            max_linear_speed=0.5,
+            max_angular_speed=1.0
+        )
+        
     def init_visualization(self):
         """Initialize visualization components."""
         self.headless = self.args.headless
@@ -128,95 +140,100 @@ class HandTrackingApp:
                     continue
                 
                 # Process frame
-                processed_frame = self.frame_processor.preprocess(frame)
+                processed_frame, crop_offset_x, crop_offset_y = self.frame_processor.preprocess(frame)
+                processed_frame_height, processed_frame_width = processed_frame.shape[:2]
                 
+                # Set frame dimensions and crop offsets in InferenceEngine
+                self.inference_engine.set_frame_dimensions(
+                    frame_shape=(self.height, self.width),
+                    processed_frame_shape=(processed_frame_height, processed_frame_width),
+                    crop_offset_x=crop_offset_x,
+                    crop_offset_y=crop_offset_y
+                )
+
                 # Prepare input for model
                 input_tensor = self.inference_engine.prepare_input(processed_frame)
                 
                 # Run inference
                 landmarks, _, hand_scores, _ = self.inference_engine.run_inference(input_tensor)
-                # Debug: palm detection confidence and normalized output
-                # Convert normalized landmark to pixel wrist position
-                if landmarks is not None and hand_scores is not None and hand_scores.size > 0:
-                    norm_x, norm_y, _ = landmarks[0, 0]
-                    wrist_position = (int(norm_x * self.width), int(norm_y * self.height))
-                    confidence = float(hand_scores[0, 0])
+                wrist_position = None
+                norm_wrist_pos_on_processed_frame = None # For debug display
+
+                if landmarks is not None and hand_scores is not None and hand_scores[0][0] > self.args.confidence:
+                    # Landmarks are normalized relative to the processed_frame (after crop, before letterbox)
+                    norm_x = landmarks[0][0][0] 
+                    norm_y = landmarks[0][0][1]
+                    norm_wrist_pos_on_processed_frame = (norm_x, norm_y) # Store for debug
+
+                    # Convert normalized coordinates (relative to processed_frame) to pixel coordinates 
+                    # on the *original* camera frame.
+                    # Step 1: Scale to processed_frame dimensions
+                    pixel_x_on_processed = norm_x * processed_frame_width
+                    pixel_y_on_processed = norm_y * processed_frame_height
+                    
+                    # Step 2: Add crop offsets to map to original frame
+                    pixel_x_on_original = pixel_x_on_processed + crop_offset_x
+                    pixel_y_on_original = pixel_y_on_processed + crop_offset_y
+                    
+                    # Ensure coordinates are within original frame bounds
+                    wrist_position = (
+                        int(np.clip(pixel_x_on_original, 0, self.width - 1)),
+                        int(np.clip(pixel_y_on_original, 0, self.height - 1))
+                    )
+                    
+                    # Debug print for coordinate transformation
+                    if self.args.debug:
+                        print(f"[MAIN_DEBUG] Norm coords (on proc_frame): ({norm_x:.3f}, {norm_y:.3f})")
+                        print(f"[MAIN_DEBUG] Processed frame shape: ({processed_frame_width}, {processed_frame_height})")
+                        print(f"[MAIN_DEBUG] Crop offsets (x,y): ({crop_offset_x}, {crop_offset_y})")
+                        print(f"[MAIN_DEBUG] Pixel (on proc_frame): ({pixel_x_on_processed:.1f}, {pixel_y_on_processed:.1f})")
+                        print(f"[MAIN_DEBUG] Final Wrist Pos (on orig_frame): {wrist_position}")
+
+                    # Validate and smooth coordinates
+                    if self.position_validator.is_valid(wrist_position):
+                        wrist_position = self.coordinate_smoother.exponential_smooth(wrist_position) # Changed from smooth
+                    else:
+                        wrist_position = None # Invalidate if jump is too large
                 else:
-                    wrist_position = None
-                    confidence = 0.0
-                print(f"[DEBUG] Palm center pixel: {wrist_position}, confidence: {confidence}")
-                # Prepare landmarks list for rendering
-                pixel_landmarks = [wrist_position] if wrist_position is not None else None
+                    # No valid detection or low confidence
+                    self.coordinate_smoother.reset() # Reset smoother if hand is lost
+
+                # Update status display
+                if self.args.debug: # Changed from self.args.display_debug_text
+                    self.status_display.update_value("FPS", f"{self.fps_counter.get_fps():.2f}")
+                    if wrist_position:
+                        self.status_display.update_value("Wrist Pos", f"({wrist_position[0]},{wrist_position[1]})")
+                    else:
+                        self.status_display.update_value("Wrist Pos", "N/A")
+                    self.status_display.draw(frame)
                 
-                # Initialize tracking variables
-                is_valid = False
-                is_suspicious = False
-                
-                # Update tracking
+                # Calculate cmd_vel values for display
+                cmd_vel_values = None
                 if wrist_position is not None:
-                    # Validate position physically
-                    is_valid = self.position_validator.is_valid(wrist_position)
-                    
-                    # Skip suspiciously still detection at the beginning to establish tracking
-                    if self.frame_count < 30:
-                        is_suspicious = False
-                    else:
-                        # Check for suspiciously still position (false positive detection)
-                        is_suspicious = self.position_validator.is_suspiciously_still(
-                            threshold=self.args.false_positive_threshold
-                        )
-                        
-                    if is_valid and not is_suspicious:
-                        # Apply ultra-minimal smoothing optimized for raw accuracy
-                        # Uses 90% current position, 10% previous for minimal jitter prevention
-                        smoothed_position = self.coordinate_smoother.exponential_smooth(wrist_position)
-                        
-                                # Enhanced confidence checks to reject false positives
-                        # Apply a stricter confidence threshold than before
-                        confidence_threshold = self.args.confidence * 1.1  # Add 10% margin to be even more cautious
-                        
-                        if confidence > confidence_threshold:
-                            # Check for stable tracking establishment - require higher confidence at the beginning
-                            if not self.hand_tracker.is_hand_present and confidence < confidence_threshold * 1.2:
-                                print(f"[DEBUG] Initial detection requires higher confidence. Got: {confidence:.2f}")
-                                self.hand_tracker.update(None)
-                            else:
-                                # Update hand tracker with raw-optimized settings but enhanced false positive rejection
-                                self.hand_tracker.update(smoothed_position, confidence)
-                                print(f"[DEBUG] Updated tracker with near-raw position: {smoothed_position}, confidence: {confidence}")
-                                if smoothed_position and wrist_position:
-                                    diff_x = abs(smoothed_position[0] - wrist_position[0])
-                                    diff_y = abs(smoothed_position[1] - wrist_position[1])
-                                    print(f"[DEBUG] Raw vs smoothed diff: dx={diff_x:.1f}, dy={diff_y:.1f} px")
-                        else:
-                            # Low confidence detection - likely a false positive
-                            print(f"[DEBUG] Rejecting low confidence detection: {confidence:.2f} < {confidence_threshold:.2f}")
-                            self.hand_tracker.update(None)
-                    else:
-                        # Position is invalid or suspicious, don't update tracking
-                        wrist_position = None
-                        self.hand_tracker.update(None)
-                        print(f"[DEBUG] Updated tracker with None - is_valid: {is_valid}, is_suspicious: {is_suspicious}")
+                    # The get_cmd_vel_display_values method in CoordinateParser
+                    # uses the frame dimensions provided during its initialization.
+                    # It does not need them passed again here.
+                    cmd_vel_values = self.coordinate_parser.get_cmd_vel_display_values(wrist_position)
                 else:
-                    # No detection
-                    self.hand_tracker.update(None)
-                    
-                # Get tracking state
-                is_hand_present = self.hand_tracker.is_hand_present
-                tracking_quality = self.hand_tracker.get_tracking_quality()
-                print(f"[DEBUG] Hand present: {is_hand_present}, quality: {tracking_quality:.2f}")
+                    cmd_vel_values = self.coordinate_parser.get_cmd_vel_display_values(None)
+                
+                print(f"[DEBUG] Hand present: {wrist_position is not None}")
+                if cmd_vel_values:
+                    print(f"[DEBUG] Cmd_vel: linear={cmd_vel_values['linear_raw']:.2f}, angular={cmd_vel_values['angular_raw']:.2f}")
+                    print(f"[DEBUG] Display values: linear={cmd_vel_values['linear_display']:.1f}, angular={cmd_vel_values['angular_display']:.1f}")
                 
                 # Display frame if not in headless mode
                 if not self.headless:
                     # Render visualization
                     output_frame = self.frame_renderer.render_frame(
                         frame=frame,
-                        landmarks=pixel_landmarks,
+                        landmarks=[wrist_position] if wrist_position is not None else None,
                         wrist_position=wrist_position,
-                        tracking_quality=tracking_quality,
-                        is_hand_present=is_hand_present,
-                        is_valid=not (is_suspicious),
+                        tracking_quality=1.0,  # Tracking quality not available in this context
+                        is_hand_present=wrist_position is not None,
+                        is_valid=True,  # Always true here, validation is done above
                         fps=self.fps_counter.get_fps(),
+                        cmd_vel_values=cmd_vel_values,
                         renderer=self.renderer,
                         status_display=self.status_display
                     )
@@ -236,11 +253,11 @@ class HandTrackingApp:
                 else:
                     # Headless mode - just print status occasionally
                     if self.frame_count % 30 == 0:
-                        status = "DETECTED" if is_hand_present else "NOT DETECTED"
+                        status = "DETECTED" if wrist_position is not None else "NOT DETECTED"
                         print(f"[STATUS] Hand: {status}, FPS: {self.fps_counter.get_fps():.1f}")
                         
                         if wrist_position is not None:
-                            print(f"[POSITION] Wrist at: {wrist_position}, Quality: {tracking_quality:.2f}")
+                            print(f"[POSITION] Wrist at: {wrist_position}")
                 
         except KeyboardInterrupt:
             print("[INFO] Interrupted by user")

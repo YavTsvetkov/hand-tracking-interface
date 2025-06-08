@@ -96,3 +96,48 @@ class StatusDisplay:
     def draw_error(self, frame, message):
         """Draw error message with error colors."""
         self.draw_notification(frame, message, color=self.colors['lost'])
+        
+    def draw_cmd_vel_display(self, frame, cmd_vel_values):
+        """Draw cmd_vel values display box."""
+        if cmd_vel_values is None:
+            return
+            
+        # Cmd_vel box background (right side of frame)
+        box_x = self.width - 250
+        cv2.rectangle(frame, (box_x, 10), (box_x + 240, 125), (0, 0, 0), -1)
+        cv2.rectangle(frame, (box_x, 10), (box_x + 240, 125), (255, 255, 255), 1)
+        
+        # Title
+        cv2.putText(frame, "CMD_VEL CONTROL", (box_x + 10, 30), self.font, 0.6, (255, 255, 255), 2)
+        
+        # Linear velocity
+        linear_display = cmd_vel_values.get('linear_display', 5.0)
+        linear_raw = cmd_vel_values.get('linear_raw', 0.0)
+        cv2.putText(frame, f"Linear: {linear_display:.1f}/10.0", (box_x + 10, 50), 
+                   self.font, 0.5, (0, 255, 255), 1)
+        
+        # Draw linear progress bar
+        bar_width = 150
+        bar_height = 8
+        linear_filled = int(bar_width * (linear_display / 10.0))
+        cv2.rectangle(frame, (box_x + 80, 60), (box_x + 80 + bar_width, 60 + bar_height), (50, 50, 50), -1)
+        cv2.rectangle(frame, (box_x + 80, 60), (box_x + 80 + linear_filled, 60 + bar_height), (0, 255, 255), -1)
+        
+        # Raw linear value
+        cv2.putText(frame, f"({linear_raw:+.2f} m/s)", (box_x + 10, 75), 
+                   self.font, 0.4, (180, 180, 180), 1)
+        
+        # Angular velocity  
+        angular_display = cmd_vel_values.get('angular_display', 5.0)
+        angular_raw = cmd_vel_values.get('angular_raw', 0.0)
+        cv2.putText(frame, f"Angular: {angular_display:.1f}/10.0", (box_x + 10, 90), 
+                   self.font, 0.5, (255, 0, 255), 1)
+        
+        # Draw angular progress bar
+        angular_filled = int(bar_width * (angular_display / 10.0))
+        cv2.rectangle(frame, (box_x + 80, 100), (box_x + 80 + bar_width, 100 + bar_height), (50, 50, 50), -1)
+        cv2.rectangle(frame, (box_x + 80, 100), (box_x + 80 + angular_filled, 100 + bar_height), (255, 0, 255), -1)
+        
+        # Raw angular value
+        cv2.putText(frame, f"({angular_raw:+.2f} rad/s)", (box_x + 10, 115), 
+                   self.font, 0.4, (180, 180, 180), 1)

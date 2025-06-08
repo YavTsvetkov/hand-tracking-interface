@@ -27,7 +27,8 @@ class FrameRenderer:
     
     def render_frame(self, frame, landmarks=None, wrist_position=None,
                     tracking_quality=0.0, is_hand_present=False, 
-                    is_valid=True, fps=0.0, renderer=None, status_display=None):
+                    is_valid=True, fps=0.0, cmd_vel_values=None, 
+                    renderer=None, status_display=None):
         """Render visualization on frame using specified components."""
         # Skip rendering if frame is None
         if frame is None:
@@ -45,11 +46,14 @@ class FrameRenderer:
             if wrist_position is not None:
                 renderer.draw_wrist_position(output_frame, wrist_position, 
                                           tracking_quality, is_valid)
-        
-        # Use status display to show tracking status if available
+         # Use status display to show tracking status if available
         if status_display is not None:
-            status_display.draw_status_box(output_frame, is_hand_present, 
+            status_display.draw_status_box(output_frame, is_hand_present,
                                          tracking_quality, wrist_position, is_valid, fps)
+            
+            # Draw cmd_vel display if available
+            if cmd_vel_values is not None:
+                status_display.draw_cmd_vel_display(output_frame, cmd_vel_values)
             
             # Display any active warnings or errors
             current_time = time.time()
