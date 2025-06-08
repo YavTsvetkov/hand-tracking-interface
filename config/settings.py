@@ -10,16 +10,16 @@ class Settings:
     DEFAULT_RESOLUTION = "640x480"
     
     # Detection settings
-    DEFAULT_MODEL_PATH = "hand_landmark_lite.tflite"
-    DEFAULT_CONFIDENCE_THRESHOLD = 0.2  # Lowered threshold - 0.6 is too high for this model
-    DEFAULT_SMOOTHING_FACTOR = 0.4
-    DEFAULT_CROP_FACTOR = 0.8
+    DEFAULT_MODEL_PATH = "models/palm_detection.tflite"
+    DEFAULT_CONFIDENCE_THRESHOLD = 0.70  # Significantly increased threshold to strongly filter out false positives
+    DEFAULT_SMOOTHING_FACTOR = 0.0       # No explicit smoothing for maximum raw accuracy
+    DEFAULT_CROP_FACTOR = 1.0            # No crop for maximum field of view
     
-    # Tracking settings
-    DEFAULT_MAX_JUMP = 150
-    DEFAULT_DETECTION_LOSS_FRAMES = 5
-    DEFAULT_STABILITY_THRESHOLD = 0.6
-    DEFAULT_FALSE_POSITIVE_THRESHOLD = 5
+    # Tracking settings - optimized for raw position accuracy
+    DEFAULT_MAX_JUMP = 250               # Very high value to accept fast movements
+    DEFAULT_DETECTION_LOSS_FRAMES = 2    # Quick to lose detection for more responsive tracking
+    DEFAULT_STABILITY_THRESHOLD = 0.3    # Lower stability threshold for faster response
+    DEFAULT_FALSE_POSITIVE_THRESHOLD = 8 # Higher threshold to reduce false positive filtering
     
     # Performance settings
     DEFAULT_FRAME_SKIP = 1

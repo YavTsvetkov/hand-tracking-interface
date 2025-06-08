@@ -6,21 +6,21 @@ import time
 from collections import deque
 
 class HandTracker:
-    """Tracks hand presence and filters false detections."""
+    """Tracks hand presence with balanced filtering for maximum raw accuracy and false positive rejection."""
     
-    def __init__(self, history_size=10, stable_threshold=3, detection_loss_frames=5):
-        """Initialize hand tracker with tracking parameters."""
-        # Tracking history
-        self.position_history = deque(maxlen=history_size)
-        self.time_history = deque(maxlen=history_size)
-        self.confidence_history = deque(maxlen=history_size)
+    def __init__(self, history_size=5, stable_threshold=3, detection_loss_frames=2):
+        """Initialize hand tracker with stricter detection criteria for false positive rejection."""
+        # Tracking history - still using small buffer for responsive tracking
+        self.position_history = deque(maxlen=5)  # Only keep 5 frames of history
+        self.time_history = deque(maxlen=5)      # Only keep 5 frames of time
+        self.confidence_history = deque(maxlen=5) # Only keep 5 frames of confidence
         
-        # Detection state
+        # Detection state - more cautious about accepting new detections
         self.is_hand_present = False
         self.consecutive_detections = 0
         self.consecutive_non_detections = 0
-        self.stable_threshold = stable_threshold  # Frames needed to confirm detection
-        self.detection_loss_frames = detection_loss_frames  # Frames before hand considered lost
+        self.stable_threshold = 3       # Require 3 consecutive detections to confirm presence (stronger false positive rejection)
+        self.detection_loss_frames = 2  # Still quick to lose detection for responsiveness
         
         # Tracking quality
         self.tracking_quality = 0.0  # 0.0-1.0
@@ -61,27 +61,30 @@ class HandTracker:
             return False
     
     def _update_tracking_quality(self):
-        """Calculate tracking quality based on detection history."""
+        """Calculate tracking quality based primarily on raw confidence for maximum accuracy."""
         # No data yet
         if not self.position_history or not self.confidence_history:
             self.tracking_quality = 0.0
             return
             
-        # Calculate average confidence
-        avg_confidence = sum(self.confidence_history) / len(self.confidence_history)
+        # Use most recent confidence value for more responsive tracking
+        # This prioritizes raw data over historical averages
+        latest_confidence = self.confidence_history[-1]
         
-        # Consider detection continuity
+        # Only very slightly consider detection continuity
         detection_factor = min(1.0, self.consecutive_detections / self.stable_threshold)
         
-        # Combine factors to get tracking quality
-        self.tracking_quality = avg_confidence * 0.7 + detection_factor * 0.3
+        # Heavily weight current confidence (90%) vs detection history (10%)
+        # This gives us more responsive, raw tracking data
+        self.tracking_quality = latest_confidence * 0.9 + detection_factor * 0.1
     
     def get_tracking_quality(self):
         """Return current tracking quality (0.0-1.0)."""
         return self.tracking_quality
     
-    def is_tracking_stable(self, threshold=0.6):
-        """Check if tracking is stable based on quality threshold."""
+    def is_tracking_stable(self, threshold=0.3):
+        """Check if tracking is stable with a lower threshold for faster response.
+        Optimized for raw position accuracy with minimal filtering."""
         return self.is_hand_present and self.tracking_quality >= threshold
     
     def reset(self):

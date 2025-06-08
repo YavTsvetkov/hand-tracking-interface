@@ -6,55 +6,70 @@ import numpy as np
 from collections import deque
 
 class CoordinateSmoother:
-    """Implements various smoothing algorithms for position data."""
+    """Implements ultra-minimal smoothing for maximum raw position accuracy."""
     
-    def __init__(self, smoothing_factor=0.4, history_size=5):
-        """Initialize coordinate smoother with smoothing parameters."""
-        self.smoothing_factor = smoothing_factor
-        self.history_size = history_size
-        self.position_history = deque(maxlen=history_size)
+    def __init__(self, smoothing_factor=0.0, history_size=2):
+        """Initialize coordinate smoother with absolute minimal history."""
+        # Completely ignore smoothing factor - we want raw accuracy
+        self.history_size = 2  # Only use 2 frames for absolute minimal filtering
+        self.position_history = deque(maxlen=2)  # Fixed size for just 2 frames
         self.smoothed_position = None
         
     def exponential_smooth(self, position):
-        """Apply exponential smoothing to position data."""
+        """Ultra-minimalist filter - either use raw position or very slight averaging.
+        Optimized for maximum raw position accuracy with bare minimum jitter filtering."""
         if position is None:
             return self.smoothed_position
             
-        # First detection - initialize smoothed position
-        if self.smoothed_position is None:
+        # Store raw position in history
+        self.position_history.append(position)
+        
+        # First detection - always use raw position with no modification
+        if len(self.position_history) < 2:
             self.smoothed_position = position
-            self.position_history.append(position)
             return position
             
-        # Apply exponential smoothing
-        alpha = self.smoothing_factor
-        self.smoothed_position = (
-            int((1 - alpha) * self.smoothed_position[0] + alpha * position[0]),
-            int((1 - alpha) * self.smoothed_position[1] + alpha * position[1])
-        )
+        # Ultra-minimal smoothing - weighted heavily toward raw position (90% current, 10% previous)
+        # This preserves almost all raw accuracy while preventing only the most extreme jitter
+        recent_positions = list(self.position_history)
         
-        # Store position in history
-        self.position_history.append(position)
+        # Apply 90/10 weighting toward current position
+        # This is barely filtering at all - almost raw data
+        current_pos = recent_positions[-1]  # Most recent position
+        prev_pos = recent_positions[-2]    # Previous position
+        
+        # Calculate weighted average with 90% weight on current position
+        avg_x = current_pos[0] * 0.9 + prev_pos[0] * 0.1
+        avg_y = current_pos[1] * 0.9 + prev_pos[1] * 0.1
+        
+        # Round to whole pixels at the end to match camera resolution precision
+        self.smoothed_position = (round(avg_x), round(avg_y))
         
         return self.smoothed_position
         
     def average_smooth(self, position):
-        """Apply simple moving average smoothing."""
+        """Apply ultra-minimal smoothing optimized for raw position accuracy."""
         if position is None:
             return self.smoothed_position
             
         # Add position to history
         self.position_history.append(position)
         
-        # Not enough points for smoothing
+        # First detection - always use raw position with no modification
         if len(self.position_history) < 2:
             return position
             
-        # Calculate average position
-        x_avg = int(sum(pos[0] for pos in self.position_history) / len(self.position_history))
-        y_avg = int(sum(pos[1] for pos in self.position_history) / len(self.position_history))
+        # Use same minimal smoothing approach as exponential_smooth
+        # Heavily weighted toward current raw position (90%)
+        recent_positions = list(self.position_history)
+        current_pos = recent_positions[-1]  # Most recent position
+        prev_pos = recent_positions[-2]    # Previous position
         
-        self.smoothed_position = (x_avg, y_avg)
+        # Calculate weighted average with 90% weight on current position
+        x_avg = current_pos[0] * 0.9 + prev_pos[0] * 0.1
+        y_avg = current_pos[1] * 0.9 + prev_pos[1] * 0.1
+        
+        self.smoothed_position = (round(x_avg), round(y_avg))
         return self.smoothed_position
         
     def reset(self):

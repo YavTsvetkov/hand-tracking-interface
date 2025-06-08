@@ -20,36 +20,46 @@ class Renderer:
         }
         
     def draw_landmarks(self, frame, landmarks, tracking_quality=1.0):
-        """Draw hand landmarks on frame."""
+        """Draw hand landmarks on frame - optimized for palm detection visualization."""
         if landmarks is None or len(landmarks) == 0:
             return
             
-        # Determine color based on tracking quality
-        if tracking_quality > 0.7:
-            color = self.colors['detected']
-        else:
-            color = self.colors['uncertain']
+        # Always use green color for maximum visibility regardless of tracking quality
+        # This helps better see the raw positions without quality-based color changes
+        color = self.colors['detected']  # Always use green for detected landmarks
             
-        # Draw landmarks and connections
-        # Draw points
+        # For palm detection, emphasize palm structure
+        # Draw points with different sizes based on importance
         for i, point in enumerate(landmarks):
-            # Larger circle for wrist
-            radius = 5 if i == 0 else 3
-            cv2.circle(frame, point, radius, color, -1)
+            # Palm landmarks (larger circles)
+            if i in [0, 5, 9, 13, 17]:  # Wrist and finger bases (palm outline)
+                radius = 10  # Increased size for better visibility
+                thickness = -1  # Filled
+            elif i in [4, 8, 12, 16, 20]:  # Fingertips
+                radius = 8  # Increased size for fingertips
+                thickness = -1
+            else:
+                radius = 4  # Slightly larger for all points for better visibility
+                thickness = -1  # Fill all points for better visibility
+                
+            cv2.circle(frame, point, radius, color, thickness)
             
-        # Draw connections between landmarks (simplified)
+        # Draw connections - emphasize palm structure for palm detection
+        # Palm outline (more prominent for palm detection)
+        palm_outline = [0, 5, 9, 13, 17, 0]  # Wrist to finger bases and back
+        self._connect_points(frame, landmarks, palm_outline, color, thickness=3)
+        
+        # Finger connections (thinner lines)
         # Thumb
-        self._connect_points(frame, landmarks, [0, 1, 2, 3, 4], color)
+        self._connect_points(frame, landmarks, [0, 1, 2, 3, 4], color, thickness=2)
         # Index finger
-        self._connect_points(frame, landmarks, [0, 5, 6, 7, 8], color)
+        self._connect_points(frame, landmarks, [5, 6, 7, 8], color, thickness=2)
         # Middle finger
-        self._connect_points(frame, landmarks, [0, 9, 10, 11, 12], color)
+        self._connect_points(frame, landmarks, [9, 10, 11, 12], color, thickness=2)
         # Ring finger
-        self._connect_points(frame, landmarks, [0, 13, 14, 15, 16], color)
+        self._connect_points(frame, landmarks, [13, 14, 15, 16], color, thickness=2)
         # Pinky
-        self._connect_points(frame, landmarks, [0, 17, 18, 19, 20], color)
-        # Palm
-        self._connect_points(frame, landmarks, [0, 5, 9, 13, 17, 0], color)
+        self._connect_points(frame, landmarks, [17, 18, 19, 20], color, thickness=2)
         
     def draw_wrist_position(self, frame, position, tracking_quality=1.0, is_valid=True):
         """Draw wrist position marker."""
@@ -73,7 +83,8 @@ class Renderer:
         for i in range(len(indices) - 1):
             start_idx = indices[i]
             end_idx = indices[i + 1]
-            cv2.line(frame, points[start_idx], points[end_idx], color, thickness)
+            if start_idx < len(points) and end_idx < len(points):
+                cv2.line(frame, points[start_idx], points[end_idx], color, thickness)
             
     def draw_status_overlay(self, frame, tracking_quality=0.0, wrist_position=None,
                           is_hand_present=False, is_valid=True, fps=0):

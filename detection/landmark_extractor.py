@@ -1,71 +1,89 @@
 """
-Hand landmark extraction and processing - optimized for hand_landmark_lite.tflite
+Landmark extractor for converting model outputs to pixel coordinates.
+This is a reconstruction based on usage patterns in the codebase.
 """
 
 import numpy as np
 
 class LandmarkExtractor:
-    """Extracts and processes hand landmarks - optimized for hand_landmark_lite.tflite model."""
+    """Extracts and converts landmarks from model outputs to pixel coordinates."""
     
-    def __init__(self, confidence_threshold=0.5, model_input_shape=(192, 192)):
-        """Initialize landmark extractor with confidence threshold and model input dimensions."""
+    def __init__(self, confidence_threshold=0.5):
+        """Initialize the landmark extractor.
+        
+        Args:
+            confidence_threshold: Minimum confidence for valid detections
+        """
         self.confidence_threshold = confidence_threshold
-        # Model input dimensions: (height, width)
-        self.model_input_shape = model_input_shape
         
     def extract_landmarks(self, landmarks, handedness, hand_scores, landmark_scores, frame_shape):
-        """Extract landmarks and convert them to image coordinates - optimized for current model."""
-        # Basic validation
+        """Extract landmarks and convert to pixel coordinates.
+        
+        Args:
+            landmarks: Raw landmark data from model [batch, landmarks, 3]
+            handedness: Hand classification (left/right)
+            hand_scores: Confidence scores for hand detection
+            landmark_scores: Confidence scores for individual landmarks
+            frame_shape: Shape of the input frame (height, width, channels)
+            
+        Returns:
+            tuple: (pixels, wrist_position, confidence)
+                - pixels: All landmarks in pixel coordinates
+                - wrist_position: Wrist center in pixel coordinates (x, y)
+                - confidence: Detection confidence score
+        """
+        
         if landmarks is None or hand_scores is None:
             return None, None, 0.0
             
-        # Extract confidence score
-        confidence = float(hand_scores[0][0])
-        print(f"[DEBUG] Landmark extractor: confidence={confidence:.3f}, threshold={self.confidence_threshold}")
-        print(f"[DEBUG] landmarks array shape: {getattr(landmarks, 'shape', None)}")
+        # Get frame dimensions
+        frame_height, frame_width = frame_shape[:2]
         
-        # Apply confidence threshold (confidence is now a probability 0-1)
+        # Get the best detection
+        if len(hand_scores.shape) > 1:
+            best_idx = np.argmax(hand_scores[0])
+            confidence = float(hand_scores[0][best_idx])
+        else:
+            best_idx = 0
+            confidence = float(hand_scores[0]) if len(hand_scores) > 0 else 0.0
+         
+        # Check confidence threshold
         if confidence < self.confidence_threshold:
-            print(f"[DEBUG] Confidence too low: {confidence:.3f} < {self.confidence_threshold}")
             return None, None, confidence
-        
-        # Extract hand landmarks - should be [1, 21, 3] format from inference engine
-        try:
-            hand_landmarks = landmarks[0]  # Expected shape: [21, 3]
-            print(f"[DEBUG] hand_landmarks length: {len(hand_landmarks)}")
-            # Verify we have the expected 21 landmarks
-            if len(hand_landmarks) != 21:
-                print(f"[DEBUG] Unexpected landmark count: {len(hand_landmarks)} != 21")
-                return None, None, confidence
-        
-        except Exception as e:
-            print(f"[DEBUG] Exception extracting landmarks: {e}")
-            return None, None, confidence
-        
-        # Get image dimensions
-        img_height, img_width = frame_shape[:2]
-        
-        # Convert landmarks to pixel coordinates
-        # Assuming normalized coordinates from model
-        pixels = []
-        # Normalize raw landmark coords (pixel values relative to model input) to [0,1]
-        in_h, in_w = self.model_input_shape
-        for i in range(21):
-            raw_x, raw_y = hand_landmarks[i][0], hand_landmarks[i][1]
-            x_norm = raw_x / in_w
-            y_norm = raw_y / in_h
-            # Convert to original frame pixel coords
-            x = int(x_norm * img_width)
-            y = int(y_norm * img_height)
-            pixels.append((x, y))
-        print(f"[DEBUG] first 5 pixel coordinates: {pixels[:5]}")
-        wrist_position = pixels[0]
-        print(f"[DEBUG] wrist_position candidate: {wrist_position}")
-                  
-        # Basic bounds check for wrist
-        if not (0 <= wrist_position[0] < img_width and 0 <= wrist_position[1] < img_height):
-            print(f"[DEBUG] Position outside frame after pixel conversion: {wrist_position}, frame size: {img_width}x{img_height}")
-            return None, None, confidence
+         
+        # Extract landmarks for best detection
+        if len(landmarks.shape) == 3:
+            landmark_set = landmarks[0]  # Remove batch dimension
+        else:
+            landmark_set = landmarks
 
-        # All checks passed
+        if len(landmark_set) == 0:
+            return None, None, confidence
+         
+        # Convert landmarks to pixel coordinates
+        pixels = []
+        for i, landmark in enumerate(landmark_set):
+            if len(landmark) >= 2:
+                x, y = landmark[0], landmark[1]
+                
+                # The coordinates might already be in pixel space or normalized
+                # Check if they appear to be normalized (0-1 range)
+                if x <= 1.0 and y <= 1.0 and x >= 0.0 and y >= 0.0:
+                    # Convert from normalized to pixel coordinates
+                    pixel_x = int(x * frame_width)
+                    pixel_y = int(y * frame_height)
+                else:
+                    # Assume already in pixel coordinates
+                    pixel_x = int(x)
+                    pixel_y = int(y)
+                     
+                pixels.append((pixel_x, pixel_y))
+            else:
+                pixels.append((0, 0))
+         
+        # Extract wrist position (typically landmark 0)
+        wrist_position = None
+        if len(pixels) > 0:
+            wrist_position = pixels[0]  # Wrist is typically the first landmark
+         
         return pixels, wrist_position, confidence
