@@ -4,6 +4,7 @@ Command line argument parsing utilities.
 
 import argparse
 from config.settings import Settings
+from config.ros_config import RosConfig
 
 def parse_args():
     """Parse command line arguments for the hand tracking application."""
@@ -18,8 +19,8 @@ def parse_args():
     # Detection settings (model is fixed to hand_landmark_lite.tflite)
     parser.add_argument('--confidence', type=float, default=Settings.DEFAULT_CONFIDENCE_THRESHOLD,
                        help=f'Minimum confidence threshold (0-1, default: {Settings.DEFAULT_CONFIDENCE_THRESHOLD})')
-    parser.add_argument('--smoothing', type=float, default=Settings.DEFAULT_SMOOTHING_FACTOR,
-                       help=f'Coordinate smoothing factor (0-1, default: {Settings.DEFAULT_SMOOTHING_FACTOR})')
+    parser.add_argument('--smoothing', type=float, default=RosConfig.CMD_SMOOTHING_FACTOR,
+                       help=f'Coordinate smoothing factor (0-1, default: {RosConfig.CMD_SMOOTHING_FACTOR})')
     parser.add_argument('--crop_factor', type=float, default=Settings.DEFAULT_CROP_FACTOR,
                        help=f'Center crop factor for better accuracy (0-1, default: {Settings.DEFAULT_CROP_FACTOR})')
     parser.add_argument('--max_jump', type=int, default=Settings.DEFAULT_MAX_JUMP,

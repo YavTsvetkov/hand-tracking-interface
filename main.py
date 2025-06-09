@@ -12,9 +12,20 @@ import numpy as np
 
 # Import existing modules where needed
 from config.settings import Settings
+from config.ros_config import RosConfig
 from camera import LibcameraCapture
 from utils import parse_args, FPSCounter
 from ros_cmd_vel import CoordinateParser
+from config.ros_config import RosConfig
+
+# Try to import ROS 2 components (optional)
+try:
+    from ros_cmd_vel.ros_publisher import RosPublisher
+    import rclpy
+    ROS_AVAILABLE = True
+except ImportError:
+    ROS_AVAILABLE = False
+    print("[WARNING] ROS 2 not available. Running in simulation mode.")
 
 # Simple MediaPipe-based detector
 try:
@@ -25,8 +36,8 @@ except ImportError:
     print("[WARNING] MediaPipe not available. Using existing palm detection.")
 
 
-class SimplifiedHandTracker:
-    """Simplified hand tracking using MediaPipe or existing palm detection."""
+class HandTracker:
+    """Hand tracking using MediaPipe or existing palm detection."""
     
     def __init__(self, use_mediapipe=True, camera_width=640, camera_height=480):
         self.camera_width = camera_width
@@ -40,7 +51,7 @@ class SimplifiedHandTracker:
         
         # Simple smoothing
         self.prev_center = None
-        self.smoothing_factor = 0.7  # Higher = less smoothing
+        self.smoothing_factor = RosConfig.HAND_SMOOTHING_FACTOR
         
     def _init_mediapipe(self):
         """Initialize MediaPipe hands detection."""
@@ -86,8 +97,10 @@ class SimplifiedHandTracker:
             y_coords = [landmark.y for landmark in hand_landmarks.landmark]
             
             # Convert normalized coordinates to pixels
-            center_x = int(np.mean(x_coords) * self.camera_width)
-            center_y = int(np.mean(y_coords) * self.camera_height)
+            norm_center_x = np.mean(x_coords)
+            norm_center_y = np.mean(y_coords)
+            center_x = int(norm_center_x * self.camera_width)
+            center_y = int(norm_center_y * self.camera_height)
             
             return (center_x, center_y)
         
@@ -130,9 +143,17 @@ class SimplifiedHandTracker:
     
     def process_frame(self, frame):
         """Process frame and return smoothed hand center."""
+        # Flip frame horizontally to remove mirror effect
+        frame = cv2.flip(frame, 1)
+        
         hand_center = self.detect_hand_center(frame)
         
         if hand_center is not None:
+            # Convert hand coordinates back to unflipped coordinate system
+            # Since we flipped the frame, we need to flip the x-coordinate back
+            unflipped_x = self.camera_width - 1 - hand_center[0]
+            hand_center = (unflipped_x, hand_center[1])
+            
             # Simple smoothing
             if self.prev_center is not None:
                 smoothed_x = int(self.prev_center[0] + self.smoothing_factor * (hand_center[0] - self.prev_center[0]))
@@ -147,8 +168,8 @@ class SimplifiedHandTracker:
         return hand_center
 
 
-class SimpleCartesianController:
-    """Simple 4-quadrant Cartesian controller for cmd_vel."""
+class CartesianController:
+    """4-quadrant Cartesian controller for cmd_vel with ROS integration."""
     
     def __init__(self, frame_width=640, frame_height=480, dead_zone=50):
         self.frame_width = frame_width
@@ -157,12 +178,55 @@ class SimpleCartesianController:
         self.center_y = frame_height // 2
         self.dead_zone = dead_zone
         
-        # Maximum speeds
+        # Initialize ROS coordinate parser with proper configuration
+        ros_config = RosConfig.get_parser_config(frame_width, frame_height)
+        self.ros_parser = CoordinateParser(
+            frame_width=ros_config['frame_width'],
+            frame_height=ros_config['frame_height'],
+            max_linear_speed=ros_config['max_linear_speed'],
+            max_angular_speed=ros_config['max_angular_speed'],
+            dead_zone_radius=ros_config['dead_zone_radius'],
+            control_zone_radius=ros_config['control_zone_radius']
+        )
+        
+        # Initialize ROS publisher if available
+        self.ros_publisher = None
+        self.ros_available = ROS_AVAILABLE  # Store global variable as instance variable
+        if self.ros_available:
+            try:
+                rclpy.init()
+                ros_config = RosConfig.get_ros_config()
+                self.ros_publisher = RosPublisher(
+                    node_name=ros_config['node_name'],
+                    topic_name=ros_config['topic_name'],
+                    publish_rate=ros_config['publish_rate']
+                )
+            except Exception as e:
+                self.ros_available = False
+        
+        # Maximum speeds (for simple display)
         self.max_linear_speed = 0.5  # m/s
         self.max_angular_speed = 1.0  # rad/s
         
     def get_cmd_vel(self, hand_position):
-        """Convert hand position to cmd_vel commands."""
+        """Convert hand position to cmd_vel commands with ROS integration."""
+        if hand_position is None:
+            ros_cmd = {'linear_x': 0.0, 'angular_z': 0.0}
+        else:
+            # Use ROS coordinate parser for proper conversion
+            ros_cmd = self.ros_parser.parse_palm_coordinates(hand_position)
+        
+        # Send to ROS 2 if available
+        if self.ros_publisher is not None:
+            try:
+                self.ros_publisher.update_command(
+                    linear_x=ros_cmd['linear_x'],
+                    angular_z=ros_cmd['angular_z']
+                )
+            except Exception as e:
+                pass  # Silently handle ROS errors in production
+        
+        # Calculate additional display info for compatibility
         if hand_position is None:
             return {
                 'linear_x': 0.0, 
@@ -176,66 +240,43 @@ class SimpleCartesianController:
         
         x, y = hand_position
         
-        # Calculate offset from center
+        # Calculate offset from center for zone detection
         dx = x - self.center_x
-        dy = y - self.center_y
+        dy = self.center_y - y  # Flip Y axis for proper Cartesian coordinates (positive Y = up)
         distance = np.sqrt(dx*dx + dy*dy)
         
-        # Check dead zone
-        if distance < self.dead_zone:
-            return {
-                'linear_x': 0.0, 
-                'angular_z': 0.0, 
-                'zone': 'center',
-                'linear_display': 0.0,
-                'angular_display': 0.0,
-                'linear_raw': 0.0,
-                'angular_raw': 0.0
-            }
-        
-        # Normalize to [-1, 1] range
-        linear_factor = -dy / (self.frame_height / 2)  # Flip Y axis (up = forward)
-        angular_factor = -dx / (self.frame_width / 2)  # Flip X axis (left = left turn)
-        
-        # Clamp to [-1, 1]
-        linear_factor = np.clip(linear_factor, -1.0, 1.0)
-        angular_factor = np.clip(angular_factor, -1.0, 1.0)
-        
-        # Apply distance-based scaling
-        max_distance = min(self.frame_width, self.frame_height) / 2
-        intensity = min(distance / max_distance, 1.0)
-        
-        # Calculate final velocities
-        linear_x = linear_factor * intensity * self.max_linear_speed
-        angular_z = angular_factor * intensity * self.max_angular_speed
-        
         # Determine zone
-        zone = self._get_zone(dx, dy)
+        zone = self._get_zone(dx, dy) if distance >= self.dead_zone else 'center'
         
         return {
-            'linear_x': linear_x,
-            'angular_z': angular_z,
+            'linear_x': ros_cmd['linear_x'],
+            'angular_z': ros_cmd['angular_z'],
             'zone': zone,
-            'intensity': intensity,
-            'linear_display': linear_x * 10,  # For display
-            'angular_display': angular_z * 10,  # For display  
-            'linear_raw': linear_x,
-            'angular_raw': angular_z
+            'intensity': distance / (min(self.frame_width, self.frame_height) / 2),
+            'linear_display': ros_cmd['linear_x'] * 10,  # For display
+            'angular_display': ros_cmd['angular_z'] * 10,  # For display  
+            'linear_raw': ros_cmd['linear_x'],
+            'angular_raw': ros_cmd['angular_z']
         }
     
     def _get_zone(self, dx, dy):
-        """Determine which quadrant/zone the hand is in."""
+        """Determine which quadrant/zone the hand is in using proper Cartesian coordinates."""
+        # dx: negative = left, positive = right
+        # dy: negative = backward/down, positive = forward/up
+        
         if abs(dx) > abs(dy):
-            return 'left' if dx < 0 else 'right'
+            # Horizontal movement dominates
+            return 'right' if dx > 0 else 'left'
         else:
-            return 'forward' if dy < 0 else 'backward'
+            # Vertical movement dominates
+            return 'forward' if dy > 0 else 'backward'
 
 
-class ImprovedHandTrackingApp:
-    """Improved hand tracking application with simplified coordinate extraction."""
+class HandTrackingApp:
+    """Hand tracking application with Cartesian coordinate system."""
     
     def __init__(self):
-        """Initialize the improved hand tracking application."""
+        """Initialize the hand tracking application."""
         # Parse command line arguments
         self.args = parse_args()
         
@@ -243,14 +284,14 @@ class ImprovedHandTrackingApp:
         self.init_camera()
         
         # Initialize simplified tracker
-        self.hand_tracker = SimplifiedHandTracker(
+        self.hand_tracker = HandTracker(
             use_mediapipe=MEDIAPIPE_AVAILABLE,
             camera_width=self.width,
             camera_height=self.height
         )
         
         # Initialize simple controller
-        self.controller = SimpleCartesianController(
+        self.controller = CartesianController(
             frame_width=self.width,
             frame_height=self.height,
             dead_zone=50
@@ -271,12 +312,13 @@ class ImprovedHandTrackingApp:
         self.width = width
         self.height = height
         
-        print(f"[INFO] Initializing camera ({width}x{height} @ {self.args.fps} FPS)")
         self.camera = LibcameraCapture(width, height, fps=self.args.fps)
         
     def run_detection_loop(self):
         """Run the simplified detection loop."""
-        print("[INFO] Starting improved detection loop")
+        print("[INFO] Starting hand tracking system")
+        print(f"[INFO] Detection method: {'MediaPipe' if MEDIAPIPE_AVAILABLE else 'Palm Detection Model'}")
+        print(f"[INFO] ROS integration: {'Enabled' if self.controller.ros_available else 'Disabled'}")
         
         try:
             while self.running:
@@ -285,25 +327,19 @@ class ImprovedHandTrackingApp:
                 # Capture frame
                 ret, frame = self.camera.read()
                 if not ret or frame is None:
-                    print("[WARNING] Failed to capture frame")
                     time.sleep(0.01)
                     continue
                 
-                # Process frame - much simpler!
+                # Process frame
                 hand_center = self.hand_tracker.process_frame(frame)
                 
                 # Get cmd_vel values
                 cmd_vel = self.controller.get_cmd_vel(hand_center)
                 
-                # Print status
-                if hand_center:
-                    print(f"[STATUS] Hand at: {hand_center}, Zone: {cmd_vel['zone']}, "
-                          f"Linear: {cmd_vel['linear_x']:.3f}, Angular: {cmd_vel['angular_z']:.3f}")
-                
                 # Display if not headless
                 if not self.args.headless:
                     self.draw_visualization(frame, hand_center, cmd_vel)
-                    cv2.imshow("Improved Hand Tracking", frame)
+                    cv2.imshow("Hand Tracking System", frame)
                     
                     key = cv2.waitKey(1) & 0xFF
                     if key == ord('q'):
@@ -341,16 +377,30 @@ class ImprovedHandTrackingApp:
         # Dead zone circle
         cv2.circle(frame, (center_x, center_y), dead_zone, (0, 255, 0), 2)
         
-        # Zone labels
-        cv2.putText(frame, "FORWARD", (center_x - 40, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, "BACKWARD", (center_x - 50, self.height - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, "LEFT", (10, center_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, "RIGHT", (self.width - 70, center_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        # Zone labels (Cartesian coordinate system)
+        cv2.putText(frame, "FORWARD (+Y)", (center_x - 60, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(frame, "BACKWARD (-Y)", (center_x - 70, self.height - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(frame, "LEFT (-X)", (10, center_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(frame, "RIGHT (+X)", (self.width - 100, center_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         cv2.putText(frame, "STOP", (center_x - 25, center_y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        # Add quadrant labels
+        cv2.putText(frame, "QI", (center_x + 60, center_y - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 100, 100), 1)
+        cv2.putText(frame, "QII", (center_x - 80, center_y - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 100, 100), 1)
+        cv2.putText(frame, "QIII", (center_x - 80, center_y + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 100, 100), 1)
+        cv2.putText(frame, "QIV", (center_x + 60, center_y + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 100, 100), 1)
         
         # Coordinate system origin marker
         cv2.circle(frame, (center_x, center_y), 5, (255, 255, 255), -1)
         cv2.putText(frame, "(0,0)", (center_x + 10, center_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Add axis arrows to show direction
+        # X-axis arrow (right = positive)
+        cv2.arrowedLine(frame, (center_x + 20, center_y), (center_x + 40, center_y), (255, 255, 255), 2)
+        cv2.putText(frame, "+X", (center_x + 45, center_y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+        # Y-axis arrow (up = positive)  
+        cv2.arrowedLine(frame, (center_x, center_y - 20), (center_x, center_y - 40), (255, 255, 255), 2)
+        cv2.putText(frame, "+Y", (center_x + 5, center_y - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
         
         # Draw hand center and tracking info
         if hand_center:
@@ -358,9 +408,9 @@ class ImprovedHandTrackingApp:
             cv2.circle(frame, hand_center, 12, (0, 0, 255), -1)
             cv2.circle(frame, hand_center, 15, (255, 255, 255), 2)
             
-            # Calculate relative coordinates from center
+            # Calculate relative coordinates from center (Cartesian system)
             rel_x = hand_center[0] - center_x
-            rel_y = hand_center[1] - center_y
+            rel_y = center_y - hand_center[1]  # Flip Y for proper Cartesian coordinates (positive Y = up)
             
             # Distance from center
             distance = int(np.sqrt(rel_x*rel_x + rel_y*rel_y))
@@ -411,7 +461,7 @@ class ImprovedHandTrackingApp:
             return
             
         self.running = False
-        print("[INFO] Cleaning up resources...")
+        print("[INFO] Shutting down...")
         
         if hasattr(self, 'camera'):
             self.camera.release()
@@ -420,5 +470,5 @@ class ImprovedHandTrackingApp:
 
 
 if __name__ == "__main__":
-    app = ImprovedHandTrackingApp()
+    app = HandTrackingApp()
     app.run_detection_loop()

@@ -1,101 +1,72 @@
-# Simplified Hand Tracking for Raspberry Pi 5
+# Hand Tracking System
 
-A simplified and accurate hand tracking system using MediaPipe, optimized for Raspberry Pi 5 with clear 4-quadrant Cartesian coordinate mapping for robotics control.
+A real-time hand tracking system using MediaPipe for robotics control applications. The system provides 4-quadrant Cartesian coordinate mapping with direct cmd_vel output suitable for robot navigation.
 
-## Features
+## Overview
 
-✅ **Simplified Architecture**
-- **50% less code** than previous complex implementation
-- **3x more accurate** coordinate extraction
-- Easy to understand and maintain
-- Two implementation options: pure MediaPipe or hybrid approach
+This hand tracking system detects hand positions using MediaPipe and converts them to robotics control commands. The system features:
 
-✅ **High Performance**
-- **Stable ~20 FPS** with MediaPipe Hands
-- Minimal computational overhead
-- Optimized for real-time robotics applications
-- Efficient coordinate processing
-
-✅ **Accurate Hand Tracking**
 - MediaPipe Hands with 21-point landmark detection
-- Direct coordinate extraction (no complex transformations)
-- Simple exponential smoothing for stability
-- Robust hand center calculation
-
-✅ **4-Quadrant Cartesian Control**
-- Clean coordinate system with visual overlay
-- Dead zone for stable "stop" commands
-- Direct mapping to cmd_vel (linear_x, angular_z)
-- Forward/Backward/Left/Right zone detection
-
-✅ **Enhanced Visualization**
-- Cartesian coordinate grid overlay
-- Real-time position labels and status panel
-- Dead zone visualization
-- Zone indicators and cmd_vel display
+- 4-quadrant Cartesian coordinate system
+- Dead zone for stable center positioning
+- Real-time cmd_vel output for ROS integration
+- Visual overlay with coordinate grid and status information
+- Exponential smoothing for position stability
 
 ## Installation
 
-### Quick Setup
+### Dependencies
+
+Install the required Python packages:
 
 ```bash
-# Clone or download the project
-cd hand_tracking
-
-# Install required dependencies
 pip install opencv-python mediapipe numpy
+```
 
-# Or use the requirements file
+Or use the requirements file:
+
+```bash
 pip install -r requirements.txt
 ```
 
-### Dependencies
-
-The simplified implementation requires only:
-- **OpenCV** (`cv2`) - Camera capture and visualization
-- **MediaPipe** (`mediapipe`) - Hand landmark detection
-- **NumPy** (`numpy`) - Mathematical operations
-
 ### System Requirements
 
-- Raspberry Pi 5 (recommended) or similar Linux system
+- Linux system (tested on Raspberry Pi 5)
 - USB camera or Raspberry Pi camera module
-- Python 3.8+
+- Python 3.8 or higher
 
 ## Usage
 
-### Simple Hand Tracking (Recommended)
+### Primary Application
 
-The main simplified implementation using pure MediaPipe:
+Run the main hand tracking application:
 
 ```bash
-# Run the simplified hand tracking
 python3 simple_hand_tracking.py
 ```
 
-This provides:
-- Pure MediaPipe Hands implementation
+This application provides:
+- Real-time hand detection and tracking
 - 4-quadrant Cartesian coordinate system
-- Real-time cmd_vel output for robotics
-- Enhanced visualization with coordinate overlays
+- cmd_vel output for robotics control
+- Visual interface with coordinate overlays
 
-### Improved Main (Hybrid Approach)
+### Alternative Implementation
 
-Alternative implementation that uses existing camera infrastructure:
+Run the alternative implementation with existing camera infrastructure:
 
 ```bash
-# Run the improved main script
-python3 improved_main.py --res 640x480
+python3 main.py --res 640x480
 ```
 
-This provides:
-- Integration with existing camera modules
-- Same simplified coordinate processing
-- Compatible with ROS cmd_vel publishing
+This implementation offers:
+- Integration with modular camera system
+- Same coordinate processing functionality
+- ROS cmd_vel publishing capability
 
 ### Output Format
 
-Both implementations output robotics-compatible cmd_vel commands:
+The system outputs robotics-compatible cmd_vel commands:
 
 ```python
 {
@@ -108,10 +79,12 @@ Both implementations output robotics-compatible cmd_vel commands:
 
 ## Configuration
 
-### SimpleHandTracker Parameters
+### Hand Tracker Settings
+
+Configure the hand tracking parameters in the `HandTracker` class:
 
 ```python
-SimpleHandTracker(
+HandTracker(
     camera_width=640,           # Camera resolution width
     camera_height=480,          # Camera resolution height
 )
@@ -122,10 +95,12 @@ min_tracking_confidence=0.5,    # Minimum confidence for hand tracking
 max_num_hands=1,                # Maximum number of hands to track
 ```
 
-### SimpleCartesianController Parameters
+### Cartesian Controller Settings
+
+Configure the coordinate mapping in the `CartesianController` class:
 
 ```python
-SimpleCartesianController(
+CartesianController(
     frame_width=640,            # Frame width for coordinate mapping
     frame_height=480,           # Frame height for coordinate mapping
     dead_zone=50,               # Dead zone radius in pixels
@@ -134,6 +109,21 @@ SimpleCartesianController(
 # Speed limits
 max_linear_speed=0.5,           # Maximum forward/backward speed (m/s)
 max_angular_speed=1.0,          # Maximum turning speed (rad/s)
+```
+
+### ROS Configuration
+
+The system includes ROS-specific configuration in `config/ros_config.py`:
+
+```python
+# ROS node settings
+DEFAULT_ROS_TOPIC = "/cmd_vel"
+DEFAULT_ROS_NODE_NAME = "hand_tracking_controller"
+DEFAULT_ROS_PUBLISH_RATE = 10.0
+
+# Smoothing factors
+CMD_SMOOTHING_FACTOR = 0.2      # For ROS cmd_vel output smoothing
+HAND_SMOOTHING_FACTOR = 0.7     # For hand coordinate tracking
 ```
 
 ### Coordinate System
@@ -146,57 +136,21 @@ The system uses a standard Cartesian coordinate system:
 - **Dead Zone**: Circular area around origin where cmd_vel = 0
 - **Quadrants**: Forward, Backward, Left, Right based on dominant axis
 
-## Performance
+## System Architecture
 
-**Raspberry Pi 5 Performance:**
-- **FPS**: Stable ~20 FPS with MediaPipe Hands
-- **Latency**: Low latency direct coordinate extraction
-- **CPU Usage**: ~30-40% single core (much more efficient than previous implementation)
-- **Memory**: ~150MB RAM (reduced from 200MB)
-- **Accuracy**: 3x more accurate than previous complex pipeline
+### Core Components
 
-**Key Improvements:**
-- Eliminated complex coordinate transformation pipeline
-- Removed unnecessary tracking validation layers
-- Direct MediaPipe processing without cropping/letterboxing
-- Simplified smoothing with exponential filter
-- Clean 4-quadrant mapping without over-engineering
+The system consists of two primary classes:
 
-## Architecture
+1. **HandTracker**: 
+   - Uses MediaPipe Hands for hand detection
+   - Calculates hand center from 21 landmarks
+   - Applies exponential smoothing for stability
 
-### Simplified Design
-
-The new architecture focuses on simplicity and accuracy:
-
-```
-simple_hand_tracking.py
-├── SimpleHandTracker          # Direct MediaPipe processing
-│   ├── MediaPipe Hands        # 21-point landmark detection
-│   ├── Hand center calculation # Average of all landmarks
-│   └── Exponential smoothing  # Simple noise reduction
-└── SimpleCartesianController  # 4-quadrant cmd_vel mapping
-    ├── Dead zone detection    # Circular stop zone
-    ├── Quadrant determination # Forward/backward/left/right
-    └── Speed scaling          # Distance-based intensity
-
-improved_main.py (Alternative)
-├── Existing camera infrastructure (camera/, config/, utils/)
-├── Simplified coordinate processing
-└── ROS integration (ros_cmd_vel/)
-```
-
-### Key Components
-
-1. **SimpleHandTracker**: 
-   - Uses MediaPipe Hands for robust hand detection
-   - Calculates hand center from all 21 landmarks (more accurate than wrist-only)
-   - Simple exponential smoothing for stability
-
-2. **SimpleCartesianController**:
-   - Clean 4-quadrant coordinate system
-   - Dead zone for stable stop commands
-   - Distance-based intensity scaling
-   - Direct cmd_vel output for robotics
+2. **CartesianController**:
+   - Maps hand coordinates to 4-quadrant system
+   - Implements dead zone for stable stop commands
+   - Generates cmd_vel output with distance-based scaling
 ## Troubleshooting
 
 ### Common Issues
@@ -217,40 +171,31 @@ improved_main.py (Alternative)
    pip install mediapipe
    ```
 
-3. **Low performance**:
-   ```bash
-   # Check CPU usage
-   htop
-   
-   # Reduce camera resolution if needed
-   # Modify camera_width and camera_height in the script
-   ```
-
-4. **Hand not detected**:
+3. **Hand not detected**:
    - Ensure good lighting conditions
    - Keep hand clearly visible in frame
    - Avoid complex backgrounds
    - Check MediaPipe confidence thresholds
 
-5. **Coordinate jitter**:
+4. **Coordinate jitter**:
    - Adjust smoothing_factor (0.7 = less smoothing, 0.3 = more smoothing)
    - Increase dead_zone radius for more stable center zone
 
 ### Performance Tips
 
-- **Good lighting** improves detection accuracy significantly
-- **Solid backgrounds** work better than complex patterns
-- **Centered hand position** gives best tracking results
-- **Steady hand movement** provides more stable coordinates
+- Good lighting improves detection accuracy
+- Solid backgrounds work better than complex patterns
+- Centered hand position provides optimal tracking
+- Steady hand movement ensures stable coordinates
 
 ## Project Structure
 
 ```
 hand_tracking/
-├── simple_hand_tracking.py    # Main simplified implementation (recommended)
-├── improved_main.py           # Hybrid approach with existing infrastructure
+├── simple_hand_tracking.py    # Main hand tracking application
+├── main.py           # Alternative implementation
 ├── requirements.txt           # Python dependencies
-├── README.md                  # This documentation
+├── README.md                  # Documentation
 ├── camera/                    # Camera handling modules
 │   ├── __init__.py
 │   ├── frame_processor.py     # Frame preprocessing utilities
@@ -271,28 +216,12 @@ hand_tracking/
 │   ├── debug_logger.py        # Debug logging utilities
 │   ├── math_utils.py          # Mathematical utilities
 │   └── timing_utils.py        # Performance timing utilities
-└── archive/                   # Archive directory (empty)
+└── archive/                   # Archive directory
 ```
-
-## Implementation Comparison
-
-### Previous Complex Implementation (Removed)
-- **Lines of Code**: ~2000+ lines across multiple modules
-- **Components**: 15+ classes with complex interactions
-- **Pipeline**: Crop → Letterbox → Model → Reverse transforms
-- **Accuracy**: Lower due to multiple coordinate transformations
-- **Maintenance**: Difficult due to over-engineering
-
-### Current Simplified Implementation
-- **Lines of Code**: ~300 lines in single file
-- **Components**: 2 focused classes
-- **Pipeline**: Direct MediaPipe → Hand center → Cmd_vel
-- **Accuracy**: 3x better with direct coordinate extraction
-- **Maintenance**: Easy to understand and modify
 
 ## ROS Integration
 
-For ROS applications, the coordinate output can be directly mapped to geometry_msgs/Twist:
+For ROS applications, the coordinate output can be mapped to geometry_msgs/Twist:
 
 ```python
 from geometry_msgs.msg import Twist
@@ -304,54 +233,13 @@ def publish_cmd_vel(cmd_vel_data):
     cmd_vel_pub.publish(twist)
 ```
 
-The `ros_cmd_vel/` directory contains ready-to-use ROS integration modules.
-## Key Improvements from Previous Implementation
-
-### Simplification Benefits
-
-1. **Reduced Complexity**:
-   - **Before**: 15+ classes across 6 modules with complex pipelines
-   - **After**: 2 focused classes in a single file
-   - **Result**: 50% less code, much easier to understand and maintain
-
-2. **Improved Accuracy**:
-   - **Before**: Multiple coordinate transformations introduced errors
-   - **After**: Direct MediaPipe coordinate extraction
-   - **Result**: 3x more accurate hand position tracking
-
-3. **Better Performance**:
-   - **Before**: Complex inference pipeline with bottlenecks
-   - **After**: Streamlined processing with MediaPipe optimization
-   - **Result**: Stable 20 FPS vs variable 15-30 FPS
-
-4. **Cleaner Coordinate System**:
-   - **Before**: Normalized coordinates requiring complex mapping
-   - **After**: Direct pixel coordinates with simple Cartesian mapping
-   - **Result**: Intuitive 4-quadrant control perfect for robotics
-
-### What Was Removed
-
-- **Complex Components**: HandTracker, PositionValidator, CoordinateSmoother
-- **Over-engineered Pipeline**: Crop → Letterbox → Model → Reverse transforms  
-- **Unnecessary Validation**: Multiple layers of position validation
-- **TensorFlow Lite**: Replaced with more efficient MediaPipe
-- **Complex Configuration**: Simplified to basic parameters
-
-### What Was Kept
-
-- **Camera Infrastructure**: Existing camera handling modules for compatibility
-- **ROS Integration**: cmd_vel publishing and coordinate parsing
-- **Utility Functions**: Math, timing, and debug utilities
-- **Configuration Management**: Basic settings and ROS config
-
+The `ros_cmd_vel/` directory contains ROS integration modules for immediate use.
 ## Getting Started
 
-1. **Install dependencies**: `pip install opencv-python mediapipe numpy`
-2. **Run simple version**: `python3 simple_hand_tracking.py`
-3. **Test coordinate mapping**: Move hand through quadrants and observe cmd_vel output
-4. **Integrate with robot**: Use cmd_vel values in your robotics application
-
-The simplified approach provides a clean foundation for hand-controlled robotics applications while maintaining high accuracy and performance.
+1. Install dependencies: `pip install opencv-python mediapipe numpy`
+2. Run the application: `python3 simple_hand_tracking.py`
+3. Test coordinate mapping by moving your hand through the quadrants
+4. Observe cmd_vel output values for integration with your robotics application
 
 ## License
 
